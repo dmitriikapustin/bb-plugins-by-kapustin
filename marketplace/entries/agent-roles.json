@@ -20,7 +20,7 @@
     "git": {
       "url": "https://github.com/dmitriikapustin/bb-plugins-by-kapustin.git",
       "subdir": "plugins/agent-roles",
-      "range": "^0.1.0",
+      "range": "^0.1.1",
       "tagPrefix": "agent-roles/"
     }
   },

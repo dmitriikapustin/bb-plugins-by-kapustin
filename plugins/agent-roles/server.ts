@@ -257,6 +257,10 @@ export const rpcContract = defineRpcContract({
     input: z.null(),
     output: z.object({ projects: z.array(z.object({ id: z.string(), name: z.string() })) }),
   },
+  model_defaults: {
+    input: z.null(),
+    output: z.object({ providerId: z.string().min(1), model: z.string().min(1), reasoningLevel: z.enum(REASONING_LEVELS) }),
+  },
   sync_run: { input: z.null(), output: syncReportSchema },
   sync_status: { input: z.null(), output: syncStatusSchema },
   role_task_create: {
@@ -1140,6 +1144,16 @@ export default async function plugin(bb: BbPluginApi) {
       const role = slug ? roleBySlug(slug) : null;
       if (!role) return null;
       return { roleSlug: role.slug, roleName: role.name, description: role.description, color: role.color, instructions: role.instructions, taskKey };
+    },
+    model_defaults: async () => {
+      const s = await settings.get();
+      return {
+        providerId: String(s.syncDefaultProvider || "claude-code"),
+        model: String(s.syncDefaultModel || "claude-opus-5[1m]"),
+        reasoningLevel: (REASONING_LEVELS as readonly string[]).includes(String(s.syncDefaultReasoning))
+          ? (String(s.syncDefaultReasoning) as (typeof REASONING_LEVELS)[number])
+          : "medium",
+      };
     },
     sync_run: () => syncNow(),
     sync_status: async () => {

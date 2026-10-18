@@ -29,6 +29,12 @@ Define reusable specialists with clear instructions and execution preferences. S
 3. Start a specialist thread or file a Tasks job from its role card.
 4. Optionally install Visual Workflows and import profiles there to build a graph.
 
+### Model selection
+
+Search by model ID or display name. The picker shows up to 50 matching models; narrow the search to reach additional results. Typing does not change the selected model: click a result, or highlight one with the arrow keys and press Enter. Escape closes the results without closing the role editor. Switching providers clears the previous catalogue while the new models load.
+
+Provider, model and reasoning controls share an aligned row; the search count and selected-model hint sit below the controls and wrap independently.
+
 ## Install
 
 From a local checkout, install this package:
