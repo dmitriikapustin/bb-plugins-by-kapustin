@@ -23,7 +23,7 @@ import {
   graphLayers,
   validateGraph,
   type RoleColor,
-} from "./shared";
+} from "./shared.ts";
 import {
   ROLE_LABEL_PREFIX,
   makeBbTasksRunner,
@@ -35,7 +35,7 @@ import {
   type SyncReport,
   type SyncState,
   type TaskRecord,
-} from "./sync";
+} from "./sync.ts";
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -60,19 +60,31 @@ const roleSchema = z.object({
 });
 export type Role = z.infer<typeof roleSchema>;
 
+const roleFields = {
+  slug: slugSchema,
+  name: z.string().trim().min(1).max(80),
+  description: z.string().trim().max(300),
+  instructions: z.string().trim().min(1).max(20_000),
+  providerId: z.string().min(1).nullable(),
+  model: z.string().min(1).nullable(),
+  reasoningLevel: z.enum(REASONING_LEVELS).nullable(),
+  permissionMode: z.enum(PERMISSION_MODES).nullable(),
+  color: z.enum(ROLE_COLORS),
+};
 const roleInputSchema = z
   .object({
-    slug: slugSchema,
-    name: z.string().trim().min(1).max(80),
-    description: z.string().trim().max(300).default(""),
-    instructions: z.string().trim().min(1).max(20_000),
-    providerId: z.string().min(1).nullable().default(null),
-    model: z.string().min(1).nullable().default(null),
-    reasoningLevel: z.enum(REASONING_LEVELS).nullable().default(null),
-    permissionMode: z.enum(PERMISSION_MODES).nullable().default(null),
-    color: z.enum(ROLE_COLORS).default("gray"),
+    ...roleFields,
+    description: roleFields.description.default(""),
+    providerId: roleFields.providerId.default(null),
+    model: roleFields.model.default(null),
+    reasoningLevel: roleFields.reasoningLevel.default(null),
+    permissionMode: roleFields.permissionMode.default(null),
+    color: roleFields.color.default("gray"),
   })
   .strict();
+// Updates must not use the creation defaults: in Zod 4, `.partial()` keeps
+// `.default()`, so an omitted field would be reset instead of left unchanged.
+const roleUpdateSchema = z.object(roleFields).partial().extend({ id: z.string().min(1) }).strip();
 
 // A team is a DAG: each node is one role invocation; `inputs` name the nodes
 // whose outputs it receives. Nodes with no inputs start immediately; a node
@@ -106,14 +118,16 @@ const teamSchema = z.object({
 });
 export type Team = z.infer<typeof teamSchema>;
 
+const teamFields = {
+  slug: slugSchema,
+  name: z.string().trim().min(1).max(80),
+  description: z.string().trim().max(300),
+  nodes: graphSchema,
+};
 const teamInputSchema = z
-  .object({
-    slug: slugSchema,
-    name: z.string().trim().min(1).max(80),
-    description: z.string().trim().max(300).default(""),
-    nodes: graphSchema,
-  })
+  .object({ ...teamFields, description: teamFields.description.default("") })
   .strict();
+const teamUpdateSchema = z.object(teamFields).partial().extend({ id: z.string().min(1) }).strip();
 
 /** Legacy stage lists (pre-DAG teams) become a layered graph. */
 function stagesToNodes(stages: Array<{ title: string; mode: string; members: Array<{ roleSlug: string; prompt: string }> }>): GraphNode[] {
@@ -237,13 +251,13 @@ const syncStatusSchema = z.object({
 export const rpcContract = defineRpcContract({
   roles_list: { input: z.null(), output: z.object({ roles: z.array(roleSchema) }) },
   roles_create: { input: roleInputSchema, output: roleSchema },
-  roles_update: { input: roleInputSchema.partial().extend({ id: z.string().min(1) }).strip(), output: roleSchema },
+  roles_update: { input: roleUpdateSchema, output: roleSchema },
   roles_delete: { input: idInput, output: okOutput },
   roles_reorder: { input: z.object({ ids: z.array(z.string()).max(500) }).strict(), output: okOutput },
   role_spawn: { input: spawnInputSchema, output: z.object({ threadId: z.string() }).strict() },
   teams_list: { input: z.null(), output: z.object({ teams: z.array(teamSchema) }) },
   teams_create: { input: teamInputSchema, output: teamSchema },
-  teams_update: { input: teamInputSchema.partial().extend({ id: z.string().min(1) }).strip(), output: teamSchema },
+  teams_update: { input: teamUpdateSchema, output: teamSchema },
   teams_delete: { input: idInput, output: okOutput },
   runs_list: {
     input: z.object({ limit: z.number().int().positive().max(200).optional() }).strict().nullable(),
