@@ -1142,15 +1142,16 @@ export default async function plugin(bb: BbPluginApi) {
     role_chat: async (input) => ({ threadId: await chatRoleTask(input) }),
     role_tasks_list: () => listRoleTasks(),
     thread_role: async ({ threadId }) => {
-      let slug: string | null = roleThread(threadId)?.role_slug ?? null;
-      let taskKey: string | null = roleThread(threadId)?.task_key ?? null;
-      if (!slug) {
-        try {
-          const meta = (await bb.sdk.threads.getPluginMetadata({ threadId })) as Record<string, unknown>;
-          if (typeof meta.roleSlug === "string") slug = meta.roleSlug;
-          if (typeof meta.taskKey === "string") taskKey = meta.taskKey;
-        } catch { /* not a role thread */ }
-      }
+      // Same precedence as agents.configure: the thread's metadata (set at
+      // spawn and when Role Picker changes the role) wins over the spawn-time
+      // row, and an empty roleSlug means the role was cleared.
+      let meta: Record<string, unknown> = {};
+      try {
+        meta = (await bb.sdk.threads.getPluginMetadata({ threadId })) as Record<string, unknown>;
+      } catch { /* fall back to the spawn-time row */ }
+      const row = roleThread(threadId);
+      const slug = typeof meta.roleSlug === "string" ? meta.roleSlug : row?.role_slug ?? null;
+      const taskKey = typeof meta.taskKey === "string" ? meta.taskKey : row?.task_key ?? null;
       const role = slug ? roleBySlug(slug) : null;
       if (!role) return null;
       return { roleSlug: role.slug, roleName: role.name, description: role.description, color: role.color, instructions: role.instructions, taskKey };

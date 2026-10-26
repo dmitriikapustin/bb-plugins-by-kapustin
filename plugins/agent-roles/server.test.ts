@@ -3,11 +3,38 @@ import assert from 'node:assert/strict';
 import { createFakePluginHost } from '@get-bb/plugin-sdk/testing';
 import plugin, { type Role, type Team } from './server.ts';
 
-async function setup() {
-  const host = createFakePluginHost({ pluginId: 'agent-roles' });
+async function setup(metadata: Record<string, Record<string, unknown>> = {}) {
+  const host = createFakePluginHost({
+    pluginId: 'agent-roles',
+    sdk: { threads: {
+      spawn: () => ({ id: 'thr_spawned' }),
+      getPluginMetadata: ({ threadId }: { threadId: string }) => metadata[threadId] ?? {},
+    } },
+  });
   await plugin(host.bb);
   return host;
 }
+
+test('thread_role follows the thread metadata over the spawn-time role', async () => {
+  const metadata: Record<string, Record<string, unknown>> = {};
+  const { harness } = await setup(metadata);
+  try {
+    await harness.callRpc('role_spawn', { roleSlug: 'analyst', prompt: 'Plan it', projectId: 'project', taskKey: 'TASK-1' });
+    const current = () => harness.callRpc('thread_role', { threadId: 'thr_spawned' }) as Promise<{ roleSlug: string; taskKey: string | null } | null>;
+
+    // No metadata readable: the spawn-time row still identifies the role.
+    assert.equal((await current())?.roleSlug, 'analyst');
+    assert.equal((await current())?.taskKey, 'TASK-1');
+
+    // Role Picker switched the thread to another role.
+    metadata.thr_spawned = { roleSlug: 'reviewer' };
+    assert.equal((await current())?.roleSlug, 'reviewer');
+
+    // Role Picker cleared the role.
+    metadata.thr_spawned = { roleSlug: '' };
+    assert.equal(await current(), null);
+  } finally { await harness.dispose(); }
+});
 
 test('a partial role update changes only the fields it names', async () => {
   const { harness } = await setup();
