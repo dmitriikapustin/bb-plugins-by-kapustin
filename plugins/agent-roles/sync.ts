@@ -14,7 +14,7 @@ import { createHash } from "node:crypto";
 import { existsSync, promises as fs, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { PERMISSION_MODES, REASONING_LEVELS, ROLE_COLORS, SLUG_RE, type RoleColor } from "./shared";
+import { PERMISSION_MODES, REASONING_LEVELS, ROLE_COLORS, SLUG_RE, type RoleColor } from "./shared.ts";
 
 // ---------------------------------------------------------------------------
 // Canonical record shared by the three sides
