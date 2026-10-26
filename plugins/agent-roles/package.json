@@ -81,6 +81,6 @@
   "scripts": {
     "build": "bb plugin build",
     "check": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test shared.test.ts"
+    "test": "node --experimental-strip-types --test shared.test.ts server.test.ts icon.test.ts"
   }
 }

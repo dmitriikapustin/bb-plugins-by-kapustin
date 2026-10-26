@@ -9,6 +9,8 @@
 .role-picker-list button { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; text-align: left; border-radius: 10px; padding: 8px 10px; cursor: pointer; font-weight: 400; transition: background 120ms ease; }
 .role-picker-list button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .role-picker-list button svg { flex-shrink: 0; }
+.role-picker-list .role-picker-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.role-picker-icon { flex-shrink: 0; width: 18px; height: 18px; border-radius: 4px; object-fit: cover; }
 .role-picker-list button:hover { background: var(--accent); }
 .role-picker-list button:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .role-picker-note { margin: 5px 5px 0; padding: 9px 5px 6px; border-top: 1px solid var(--border); font-size: 10px; color: var(--muted-foreground); }

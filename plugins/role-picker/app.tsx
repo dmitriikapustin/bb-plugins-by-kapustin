@@ -50,14 +50,14 @@ function RolePicker() {
   return <div className="role-picker" ref={root}>
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild><Button type="button" variant="ghost" size="sm" aria-label={selected ? `Agent role: ${selected.name}` : 'Choose an agent role'} className="role-picker-trigger" data-selected={Boolean(selected)}>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.25"/><path d="M5.5 20v-1.5a6.5 6.5 0 0 1 13 0V20"/></svg>
+        {selected?.iconDataUrl ? <RoleIcon src={selected.iconDataUrl} /> : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.25"/><path d="M5.5 20v-1.5a6.5 6.5 0 0 1 13 0V20"/></svg>}
         {selected && <span>{selected.name}</span>}
       </Button></Popover.Trigger>
       <Popover.Portal><Popover.Content side="top" align="end" sideOffset={8} className="role-picker-menu" aria-label="Choose an agent">
         <div className="role-picker-heading">Agent</div>
         {loading ? <p role="status">Loading…</p> : error ? <p role="alert">{error}</p> : <div className="role-picker-list">
           <button type="button" aria-pressed={!selected} onClick={() => { touched.current = true; setSelected(null); setChanged(true); setOpen(false); }}><span>No role</span>{!selected && <Check />}</button>
-          {roles.map(role => <button type="button" key={role.slug} title={role.description} aria-pressed={selected?.slug === role.slug} onClick={() => { touched.current = true; setSelected(role); setChanged(true); setOpen(false); }}><span>{role.name}</span>{selected?.slug === role.slug && <Check />}</button>)}
+          {roles.map(role => <button type="button" key={role.slug} title={role.description} aria-pressed={selected?.slug === role.slug} onClick={() => { touched.current = true; setSelected(role); setChanged(true); setOpen(false); }}><span className="role-picker-name">{role.iconDataUrl && <RoleIcon src={role.iconDataUrl} />}<span>{role.name}</span></span>{selected?.slug === role.slug && <Check />}</button>)}
           {!roles.length && <p>No roles available. Reload the plugin.</p>}
         </div>}
         <div className="role-picker-note">{composer.scope.kind === 'new-thread' ? 'Applies from the first message' : 'Applies from the next message'} · in this thread</div>
@@ -65,6 +65,10 @@ function RolePicker() {
     </Popover.Root>
 
   </div>;
+}
+/** Decorative: the role name remains the accessible label. */
+function RoleIcon({ src }: { src: string }) {
+  return <img className="role-picker-icon" src={src} alt="" aria-hidden="true" width={18} height={18} />;
 }
 function Check() {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>;

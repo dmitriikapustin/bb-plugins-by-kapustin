@@ -7,7 +7,7 @@
 //   /plugins/agent-roles/roles/teams      teams (visual DAG constructor)
 //   /plugins/agent-roles/roles/runs       runs
 //   /plugins/agent-roles/roles/runs/<id>  one run
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps, ReactNode } from "react";
 import {
   ThreadChat,
@@ -23,7 +23,7 @@ import { toast } from "sonner";
 import type { Role, RoleTask, Team, TeamRun, TeamRunWithSteps, rpcContract } from "./server";
 import { GraphCanvas } from "./graph-canvas";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { ROLES_CHANGED, ROLE_COLORS, RUNS_CHANGED, SLUG_RE, graphLayers, validateGraph, connectGraph, type RoleColor } from "./shared";
+import { ICON_SIDE, MAX_ICON_DATA_URL, ROLES_CHANGED, ROLE_COLORS, RUNS_CHANGED, SLUG_RE, graphLayers, validateGraph, connectGraph, type RoleColor } from "./shared";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { Input } from "@/components/ui/input";
@@ -171,13 +171,41 @@ function useAsync() {
 type RoleDraft = Omit<Role, "id" | "sortOrder" | "createdAt" | "updatedAt">;
 const emptyRole = (): RoleDraft => ({
   slug: "", name: "", description: "", instructions: "",
-  providerId: null, model: null, reasoningLevel: null, permissionMode: null, color: "gray",
+  providerId: null, model: null, reasoningLevel: null, permissionMode: null, color: "gray", iconDataUrl: null,
 });
 /** Only the editable fields: an existing Role carries id/sortOrder/timestamps the strict RPC schema rejects. */
 const roleDraft = (r: RoleDraft): RoleDraft => ({
   slug: r.slug.trim(), name: r.name.trim(), description: r.description, instructions: r.instructions,
   providerId: r.providerId, model: r.model, reasoningLevel: r.reasoningLevel, permissionMode: r.permissionMode, color: r.color,
+  iconDataUrl: r.iconDataUrl,
 });
+
+/** Scale a picked image to fit ICON_SIDE × ICON_SIDE and re-encode it as a PNG data URL. */
+async function iconFromFile(file: File): Promise<string> {
+  const bitmap = await createImageBitmap(file);
+  try {
+    const scale = Math.min(1, ICON_SIDE / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Could not read the image.");
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const url = canvas.toDataURL("image/png");
+    if (url.length > MAX_ICON_DATA_URL) throw new Error("The image is too detailed to use as an icon.");
+    return url;
+  } finally {
+    bitmap.close();
+  }
+}
+
+/** The role's icon when it has one, otherwise its colour dot. Decorative: the role name stays the label. */
+function RoleMark({ role, className }: { role: Pick<Role, "color"> & { iconDataUrl?: string | null }; className?: string }) {
+  if (role.iconDataUrl) {
+    return <img src={role.iconDataUrl} alt="" aria-hidden="true" className={cn("size-5 shrink-0 rounded object-cover", className)} />;
+  }
+  return <span aria-hidden="true" className={cn("size-2.5 shrink-0 rounded-full", COLOR_DOT[role.color], className)} />;
+}
 
 function RoleCheckbox({ className, ...props }: Omit<ComponentProps<"input">, "type">) {
   return (
@@ -194,6 +222,25 @@ function RoleCheckbox({ className, ...props }: Omit<ComponentProps<"input">, "ty
 function RoleEditor({ initial, onSave, onCancel, busy }: { initial: RoleDraft; onSave: (draft: RoleDraft) => void; onCancel: () => void; busy: boolean }) {
   const [d, setD] = useState<RoleDraft>(initial);
   const [slugTouched, setSlugTouched] = useState(initial.slug !== "");
+  // An image is converted asynchronously. Only the latest pick may land, and
+  // Remove discards a pick still being converted. Saving waits for it.
+  const iconRequest = useRef(0);
+  const [convertingIcon, setConvertingIcon] = useState(false);
+  const pickIcon = (file: File) => {
+    const request = ++iconRequest.current;
+    setConvertingIcon(true);
+    iconFromFile(file).then(
+      (url) => { if (request === iconRequest.current) set("iconDataUrl", url); },
+      (error: unknown) => {
+        if (request === iconRequest.current) toast.error(error instanceof Error && error.message.startsWith("The image") ? error.message : "Could not read that image.");
+      },
+    ).finally(() => { if (request === iconRequest.current) setConvertingIcon(false); });
+  };
+  const removeIcon = () => {
+    iconRequest.current++;
+    setConvertingIcon(false);
+    set("iconDataUrl", null);
+  };
   const inherit = d.providerId === null || d.model === null;
   const set = <K extends keyof RoleDraft>(key: K, value: RoleDraft[K]) => setD((prev) => ({ ...prev, [key]: value }));
   const problems = [
@@ -205,7 +252,7 @@ function RoleEditor({ initial, onSave, onCancel, busy }: { initial: RoleDraft; o
   return (
     <form
       className={editorCls}
-      onSubmit={(event) => { event.preventDefault(); if (valid && !busy) onSave(d); }}
+      onSubmit={(event) => { event.preventDefault(); if (valid && !busy && !convertingIcon) onSave(d); }}
     >
       <div className="grid gap-5 sm:grid-cols-2">
         <Field label="Name">
@@ -258,12 +305,27 @@ function RoleEditor({ initial, onSave, onCancel, busy }: { initial: RoleDraft; o
             ))}
           </div>
         </Field>
+        <Field label="Icon">
+          <div className="flex items-center gap-3">
+            {d.iconDataUrl ? <img src={d.iconDataUrl} alt="Current icon" className="size-8 rounded object-cover" /> : null}
+            <label className="inline-flex cursor-pointer items-center text-sm text-muted-foreground underline-offset-4 hover:underline">
+              {convertingIcon ? "Preparing image…" : d.iconDataUrl ? "Replace" : "Choose image"}
+              <input type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" disabled={busy}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (file) pickIcon(file);
+                }} />
+            </label>
+            {d.iconDataUrl || convertingIcon ? <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={removeIcon}>Remove</Button> : null}
+          </div>
+        </Field>
       </div>
       <div className={editorFooterCls}>
         <ValidationHints problems={problems} />
         <span className="flex-1" />
         <Button type="button" variant="ghost" onClick={onCancel} disabled={busy}>Cancel</Button>
-        <Button type="submit" disabled={!valid || busy}>Save role</Button>
+        <Button type="submit" disabled={!valid || busy || convertingIcon}>Save role</Button>
       </div>
     </form>
   );
@@ -313,12 +375,12 @@ function SpawnBox({ role, onClose, onFiled }: { role: Role; onClose: () => void;
 }
 
 /** The role card shown in thread headers and via `::agent-role{slug="…"}` in messages. */
-function RoleCard({ role, taskKey, compact }: { role: Pick<Role, "name" | "slug" | "description" | "color"> & { instructions?: string }; taskKey?: string | null; compact?: boolean }) {
+function RoleCard({ role, taskKey, compact }: { role: Pick<Role, "name" | "slug" | "description" | "color"> & { iconDataUrl?: string | null; instructions?: string }; taskKey?: string | null; compact?: boolean }) {
   const [open, setOpen] = useState(false);
   return (
     <div className={cn("inline-flex max-w-full flex-col rounded-lg border border-border/70 bg-muted/30", compact ? "px-2 py-1" : "px-3 py-2")}>
       <button type="button" className="flex items-center gap-2 text-left" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-label={`Agent role ${role.name}`}>
-        <span className={cn("size-2.5 shrink-0 rounded-full", COLOR_DOT[role.color])} />
+        <RoleMark role={role} className={compact && role.iconDataUrl ? "size-4" : undefined} />
         <span className={cn("font-medium", compact ? "text-xs" : "text-sm")}>{role.name}</span>
         <code className="text-[11px] text-muted-foreground/70">{role.slug}</code>
         {taskKey ? <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">{taskKey}</span> : null}
@@ -352,7 +414,7 @@ function ThreadRoleBadge({ threadId, isCompactViewport }: { threadId: string; pr
     rpc.call("thread_role", { threadId }).then(setInfo).catch(() => setInfo(null));
   }, [rpc, threadId]);
   if (!info) return null;
-  return <RoleCard role={{ name: info.roleName, slug: info.roleSlug, description: info.description, color: info.color, instructions: info.instructions }} taskKey={info.taskKey} compact={isCompactViewport} />;
+  return <RoleCard role={{ name: info.roleName, slug: info.roleSlug, description: info.description, color: info.color, iconDataUrl: info.iconDataUrl, instructions: info.instructions }} taskKey={info.taskKey} compact={isCompactViewport} />;
 }
 
 function RoleJobs({ roles, refreshKey }: { roles: Role[]; refreshKey: number }) {
@@ -383,7 +445,7 @@ function RoleJobs({ roles, refreshKey }: { roles: Role[]; refreshKey: number }) 
           const role = roleOf(t.roleSlug);
           return (
             <li key={t.key} className="flex items-center gap-3 px-3 py-2">
-              <span className={cn("size-2.5 shrink-0 rounded-full", COLOR_DOT[role?.color ?? "gray"])} />
+              <RoleMark role={role ?? { color: "gray" }} />
               <code className="shrink-0 text-xs text-muted-foreground">{t.key}</code>
               <span className="min-w-0 flex-1 truncate text-sm">{t.title}</span>
               <span className="shrink-0 text-xs text-muted-foreground">{t.status.replace("_", " ")}</span>
@@ -494,7 +556,7 @@ function RolesView() {
             <li key={r.id} className="group py-5 first:pt-0">
               <>
                   <div className="flex items-start gap-3">
-                    <span className={cn("mt-[7px] size-2.5 shrink-0 rounded-full", COLOR_DOT[r.color])} />
+                    <RoleMark role={r} className={r.iconDataUrl ? "mt-0.5" : "mt-[7px]"} />
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-baseline gap-x-2.5">
                         <span className="text-[15px] font-medium">{r.name}</span>
