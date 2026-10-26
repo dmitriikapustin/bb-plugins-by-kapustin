@@ -22,6 +22,7 @@ import {
   SLUG_RE,
   graphLayers,
   validateGraph,
+  MAX_ICON_DATA_URL,
   type RoleColor,
 } from "./shared.ts";
 import {
@@ -36,6 +37,7 @@ import {
   type SyncState,
   type TaskRecord,
 } from "./sync.ts";
+import { iconProblem } from "./icon.ts";
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -54,11 +56,25 @@ const roleSchema = z.object({
   reasoningLevel: z.enum(REASONING_LEVELS).nullable(),
   permissionMode: z.enum(PERMISSION_MODES).nullable(),
   color: z.enum(ROLE_COLORS),
+  /** Optional PNG data URL shown beside the role name; null when unset. */
+  iconDataUrl: z.string().nullable(),
   sortOrder: z.number().int(),
   createdAt: z.number().int(),
   updatedAt: z.number().int(),
 });
 export type Role = z.infer<typeof roleSchema>;
+
+const ROLE_SELECT = `SELECT roles.*, role_icons.data_url AS icon_data_url FROM roles LEFT JOIN role_icons ON role_icons.role_id = roles.id`;
+const withoutIcon = ({ iconDataUrl: _icon, ...role }: Role): Omit<Role, "iconDataUrl"> => role;
+
+const iconInputSchema = z
+  .string()
+  .max(MAX_ICON_DATA_URL)
+  .superRefine((value, ctx) => {
+    const problem = iconProblem(value);
+    if (problem) ctx.addIssue({ code: "custom", message: `Icon ${problem}.` });
+  })
+  .nullable();
 
 const roleFields = {
   slug: slugSchema,
@@ -70,6 +86,8 @@ const roleFields = {
   reasoningLevel: z.enum(REASONING_LEVELS).nullable(),
   permissionMode: z.enum(PERMISSION_MODES).nullable(),
   color: z.enum(ROLE_COLORS),
+  /** Omit to keep the current icon; null removes it. */
+  iconDataUrl: iconInputSchema.optional(),
 };
 const roleInputSchema = z
   .object({
@@ -216,6 +234,7 @@ const threadRoleSchema = z.object({
   roleName: z.string(),
   description: z.string(),
   color: z.enum(ROLE_COLORS),
+  iconDataUrl: z.string().nullable(),
   instructions: z.string(),
   taskKey: z.string().nullable(),
 }).nullable();
@@ -501,6 +520,12 @@ export default async function plugin(bb: BbPluginApi) {
        last_report_hash TEXT,
        created_at INTEGER NOT NULL
      )`,
+    // Icons live in their own table so older versions of this plugin, which
+    // do not know the column, keep reading and writing roles unchanged.
+    `CREATE TABLE IF NOT EXISTS role_icons (
+       role_id TEXT PRIMARY KEY REFERENCES roles(id) ON DELETE CASCADE,
+       data_url TEXT NOT NULL
+     )`,
   ]);
   db.pragma("foreign_keys = ON");
 
@@ -524,6 +549,7 @@ export default async function plugin(bb: BbPluginApi) {
     id: string; slug: string; name: string; description: string; instructions: string;
     provider_id: string | null; model: string | null; reasoning_level: string | null;
     permission_mode: string | null; color: string; sort_order: number; created_at: number; updated_at: number;
+    icon_data_url: string | null;
   }
   const toRole = (r: RoleRow): Role =>
     roleSchema.parse({
@@ -531,13 +557,14 @@ export default async function plugin(bb: BbPluginApi) {
       providerId: r.provider_id, model: r.model,
       reasoningLevel: r.reasoning_level, permissionMode: r.permission_mode,
       color: (ROLE_COLORS as readonly string[]).includes(r.color) ? r.color : "gray",
+      iconDataUrl: r.icon_data_url,
       sortOrder: r.sort_order, createdAt: r.created_at, updatedAt: r.updated_at,
     });
 
   const roleStmts = {
-    list: db.prepare(`SELECT * FROM roles ORDER BY sort_order, created_at`),
-    get: db.prepare(`SELECT * FROM roles WHERE id = ?`),
-    bySlug: db.prepare(`SELECT * FROM roles WHERE slug = ?`),
+    list: db.prepare(`${ROLE_SELECT} ORDER BY roles.sort_order, roles.created_at`),
+    get: db.prepare(`${ROLE_SELECT} WHERE roles.id = ?`),
+    bySlug: db.prepare(`${ROLE_SELECT} WHERE roles.slug = ?`),
     maxSort: db.prepare(`SELECT COALESCE(MAX(sort_order), -1) AS m FROM roles`),
     insert: db.prepare(`INSERT INTO roles (id, slug, name, description, instructions, provider_id, model, reasoning_level, permission_mode, color, sort_order, created_at, updated_at)
       VALUES (@id, @slug, @name, @description, @instructions, @providerId, @model, @reasoningLevel, @permissionMode, @color, @sortOrder, @now, @now)`),
@@ -545,6 +572,14 @@ export default async function plugin(bb: BbPluginApi) {
       reasoning_level=@reasoningLevel, permission_mode=@permissionMode, color=@color, updated_at=@now WHERE id=@id`),
     setSort: db.prepare(`UPDATE roles SET sort_order = ? WHERE id = ?`),
     delete: db.prepare(`DELETE FROM roles WHERE id = ?`),
+    setIcon: db.prepare(`INSERT INTO role_icons (role_id, data_url) VALUES (?, ?) ON CONFLICT(role_id) DO UPDATE SET data_url = excluded.data_url`),
+    removeIcon: db.prepare(`DELETE FROM role_icons WHERE role_id = ?`),
+  };
+  /** undefined leaves the icon as it is; null removes it. */
+  const writeIcon = (id: string, icon: string | null | undefined) => {
+    if (icon === undefined) return;
+    if (icon === null) roleStmts.removeIcon.run(id);
+    else roleStmts.setIcon.run(id, icon);
   };
   const listRoles = () => (roleStmts.list.all() as RoleRow[]).map(toRole);
   const getRole = (id: string) => { const r = roleStmts.get.get(id) as RoleRow | undefined; return r ? toRole(r) : null; };
@@ -559,7 +594,11 @@ export default async function plugin(bb: BbPluginApi) {
     if (roleBySlug(input.slug)) throw new Error(`Role slug "${input.slug}" already exists`);
     const id = newId("role");
     const { m } = roleStmts.maxSort.get() as { m: number };
-    roleStmts.insert.run({ id, ...input, sortOrder: m + 1, now: Date.now() });
+    const { iconDataUrl, ...fields } = input;
+    db.transaction(() => {
+      roleStmts.insert.run({ id, ...fields, sortOrder: m + 1, now: Date.now() });
+      writeIcon(id, iconDataUrl);
+    })();
     publishRoles();
     scheduleSync();
     return getRole(id)!;
@@ -569,7 +608,11 @@ export default async function plugin(bb: BbPluginApi) {
     if (!current) throw new Error(`No role with id ${id}`);
     const next = { ...current, ...patch };
     if (next.slug !== current.slug && roleBySlug(next.slug)) throw new Error(`Role slug "${next.slug}" already exists`);
-    roleStmts.update.run({ ...next, id, now: Date.now() });
+    const { iconDataUrl: _icon, ...fields } = next;
+    db.transaction(() => {
+      roleStmts.update.run({ ...fields, id, now: Date.now() });
+      writeIcon(id, patch.iconDataUrl);
+    })();
     publishRoles();
     scheduleSync();
     return getRole(id)!;
@@ -1154,7 +1197,7 @@ export default async function plugin(bb: BbPluginApi) {
       const taskKey = typeof meta.taskKey === "string" ? meta.taskKey : row?.task_key ?? null;
       const role = slug ? roleBySlug(slug) : null;
       if (!role) return null;
-      return { roleSlug: role.slug, roleName: role.name, description: role.description, color: role.color, instructions: role.instructions, taskKey };
+      return { roleSlug: role.slug, roleName: role.name, description: role.description, color: role.color, iconDataUrl: role.iconDataUrl, instructions: role.instructions, taskKey };
     },
     sync_run: () => syncNow(),
     sync_status: async () => {
@@ -1250,13 +1293,14 @@ export default async function plugin(bb: BbPluginApi) {
           case undefined: case "help": case "--help":
             return { exitCode: 0, stdout: usage };
           case "list": {
-            const roles = listRoles();
+            // Icons are large data URLs; CLI output, which agents read, leaves them out.
+            const roles = listRoles().map(withoutIcon);
             return reply(roles, roles.map((r) => `${r.slug.padEnd(12)} ${r.name.padEnd(14)} ${r.providerId && r.model ? `${r.providerId}/${r.model}` : "(inherit model)"}  ${r.description}`).join("\n") || "No roles.");
           }
           case "show": {
             const role = rest[0] ? findRole(rest[0]) : null;
             if (!role) return fail(`No role "${rest[0] ?? ""}".`);
-            return reply(role, `${role.name} (${role.slug})\n${role.description}\nmodel: ${role.providerId ?? "inherit"}/${role.model ?? "inherit"} reasoning: ${role.reasoningLevel ?? "inherit"} permissions: ${role.permissionMode ?? "inherit"}\n\n${role.instructions}`);
+            return reply(withoutIcon(role), `${role.name} (${role.slug})\n${role.description}\nmodel: ${role.providerId ?? "inherit"}/${role.model ?? "inherit"} reasoning: ${role.reasoningLevel ?? "inherit"} permissions: ${role.permissionMode ?? "inherit"}\n\n${role.instructions}`);
           }
           case "spawn": {
             const role = rest[0] ? findRole(rest[0]) : null;

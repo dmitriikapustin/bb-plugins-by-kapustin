@@ -1,7 +1,9 @@
 import { defineRpcContract, type BbPluginApi } from '@get-bb/plugin-sdk';
 import { z } from 'zod';
 import { presets } from './presets.ts';
-const role = z.object({ id: z.string(), slug: z.string(), name: z.string(), description: z.string(), instructions: z.string(), color: z.string() });
+// iconDataUrl comes from Agent Roles; older versions omit it, and anything but a PNG data URL becomes null.
+const icon = z.string().regex(/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/).max(100_000).nullable().optional().catch(null);
+const role = z.object({ id: z.string(), slug: z.string(), name: z.string(), description: z.string(), instructions: z.string(), color: z.string(), iconDataUrl: icon });
 const rolesOutput = z.object({ roles: z.array(role) });
 const metadata = z.object({ roleId: z.string(), roleSlug: z.string(), roleName: z.string(), roleColor: z.string() });
 export type Role = z.infer<typeof role>;

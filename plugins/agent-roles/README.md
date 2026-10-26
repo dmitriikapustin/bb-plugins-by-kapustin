@@ -18,7 +18,7 @@ Define reusable specialists with clear instructions and execution preferences. S
 
 | | |
 | --- | --- |
-| **Reusable specialists** | Give each role a purpose, instructions and optional provider, model and permission defaults. |
+| **Reusable specialists** | Give each role a purpose, instructions, an optional icon and optional provider, model and permission defaults. |
 | **Optional companions** | Apply profiles with Role Picker, or import independent copies into Visual Workflows. |
 | **Work you can inspect** | File a task for a specialist, or start a thread when you are ready. Legacy team runs remain accessible through the CLI. |
 

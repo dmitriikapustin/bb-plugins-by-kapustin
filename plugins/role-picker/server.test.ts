@@ -78,3 +78,14 @@ test('an unhealthy companion does not hide the independent preset list',async()=
  const host=createFakePluginHost({pluginId:'role-picker',sdk:{plugins:{list:()=>({plugins:[{id:'agent-roles',enabled:true,status:'running'}]}),callRpc:()=>{throw new Error('Companion unavailable');}}}});
  try{plugin(host.bb);const result:any=await host.harness.callRpc('roles',null);assert.equal(result.roles.length,6);await assert.rejects(host.harness.callRpc('prepare',{roleSlug:'shared:qa',threadId:null}));}finally{await host.harness.dispose();}
 });
+test('Agent Roles icons pass through when shaped like PNG data URLs; others become null and missing ones stay absent', async () => {
+ // Role Picker only checks the shape and length; Agent Roles checks the image itself.
+ const png='data:image/png;base64,iVBORw0KGgo=';
+ const roles=[{...role,slug:'a',iconDataUrl:png},{...role,slug:'b',iconDataUrl:'javascript:alert(1)'},{...role,slug:'c',iconDataUrl:null},{...role,slug:'d'}];
+ const host=createFakePluginHost({pluginId:'role-picker',sdk:{plugins:{list:()=>({plugins:[{id:'agent-roles',enabled:true,status:'running'}]}),callRpc:()=>({roles})}}});
+ try{plugin(host.bb);const list:any=await host.harness.callRpc('roles',null);
+  const icon=(slug:string)=>list.roles.find((r:any)=>r.slug==='shared:'+slug).iconDataUrl;
+  assert.equal(icon('a'),png); assert.equal(icon('b'),null); assert.equal(icon('c'),null); assert.equal('iconDataUrl' in list.roles.find((r:any)=>r.slug==='shared:d'),false);
+  assert.equal(list.roles.filter((r:any)=>r.slug.startsWith('local-')&&r.iconDataUrl).length,0);
+ }finally{await host.harness.dispose();}
+});

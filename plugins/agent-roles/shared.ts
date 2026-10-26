@@ -91,3 +91,8 @@ export function connectGraph<T extends GraphNodeShape>(nodes: T[], next: GraphEd
   validateGraph(result);
   return result;
 }
+
+/** Role icons: a PNG data URL of at most this many characters. */
+export const MAX_ICON_DATA_URL = 100_000;
+/** Longest side, in pixels, of the icon the editor stores. */
+export const ICON_SIDE = 64;

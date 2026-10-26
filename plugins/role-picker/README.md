@@ -18,7 +18,7 @@ Choose a role beside the composer and send your message normally. Bring speciali
 
 | | |
 | --- | --- |
-| **Choose as you write** | Choose one of six included specialists, or a role from Agent Roles when it is installed. |
+| **Choose as you write** | Choose one of six included specialists, or a role from Agent Roles when it is installed. Agent Roles icons appear beside role names. |
 | **Keep the conversation** | The role applies from the next message in an existing thread, or from the first message in a new one. |
 | **Keep your setup** | Your selected model, provider, permissions, environment, attachments and mentions remain in effect. |
 
